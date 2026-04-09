@@ -57,3 +57,7 @@ SESSION_SECRET=prod-secret NODE_ENV=production npm start
 - 站点保存时会先调用 CPA 管理 API 校验地址和管理密钥
 - 聚合总览允许部分站点失败，失败信息会显示在站点状态卡片中
 - 定时器会持续刷新公开快照，并基于聚合结果触发告警
+
+---
+
+> 本项目由 [AiCarrox](https://github.com/AiCarrox) 维护
