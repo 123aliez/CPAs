@@ -10,7 +10,7 @@
 - 公开页 `/` 展示最近一次成功聚合的快照
 - 支持配额告警：飞书、Telegram、Qmsg、通用 Webhook
 
-线上域名为 `cpas.6553501.xyz`。
+线上域名由宿主机 Nginx 站点配置决定。
 
 ## 开发
 
@@ -28,7 +28,7 @@ SESSION_SECRET=dev-secret npm run dev
 
 - **应用本体** 使用 Docker Compose 运行
 - **宿主机 Nginx** 继续负责 `80/443`、证书和域名入口
-- 宿主机 Nginx 将 `cpas.6553501.xyz` 反代到 `127.0.0.1:4179`
+- 宿主机 Nginx 将站点域名反代到 `127.0.0.1:4179`
 - Docker 容器将 `127.0.0.1:4179` 映射到容器内应用端口 `4179`
 
 ### 首次部署
@@ -103,7 +103,7 @@ Docker Compose 默认将宿主机目录 `./data` 挂载到容器内 `/app/.data`
 
 - `Dockerfile`
 - `docker-compose.yml`
-- `deploy/cpas.6553501.xyz.conf`（宿主机 Nginx 站点配置）
+- `deploy/cpas.nginx.conf.example`（宿主机 Nginx 站点配置示例）
 - `.env.production.example`
 
 ## 说明

@@ -10,7 +10,6 @@ export function LoginPage({ onLogin, error, loading }: { onLogin: (password: str
 
   return (
     <div style={{ maxWidth: 360, margin: '80px auto', padding: '0 20px' }}>
-      <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase' }}>cpas.6553501.xyz</div>
       <h1 style={{ fontSize: 20, fontWeight: 600, margin: '4px 0 8px' }}>管理面板</h1>
       <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16 }}>输入管理员密码进入站点配置</p>
       <form onSubmit={submit}>

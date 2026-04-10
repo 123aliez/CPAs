@@ -1,6 +1,6 @@
 server {
     listen 80;
-    server_name cpas.6553501.xyz;
+    server_name your-domain.example;
 
     location /.well-known/acme-challenge/ {
         root /var/www/acme;
@@ -14,10 +14,10 @@ server {
 server {
     listen 443 ssl;
     http2 on;
-    server_name cpas.6553501.xyz;
+    server_name your-domain.example;
 
-    ssl_certificate /usr/local/nginx/conf/ssl/cpas.6553501.xyz/fullchain.pem;
-    ssl_certificate_key /usr/local/nginx/conf/ssl/cpas.6553501.xyz/key.pem;
+    ssl_certificate /usr/local/nginx/conf/ssl/your-domain.example/fullchain.pem;
+    ssl_certificate_key /usr/local/nginx/conf/ssl/your-domain.example/key.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_ciphers HIGH:!aNULL:!MD5;
     ssl_prefer_server_ciphers on;
