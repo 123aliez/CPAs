@@ -4,3 +4,4 @@ node_modules
 .env.production
 .data/
 data/
+CLAUDE.md
