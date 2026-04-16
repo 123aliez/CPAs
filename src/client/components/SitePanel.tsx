@@ -3,6 +3,8 @@ import type { OverviewAccount } from '../../shared/types';
 import { providerAccent } from '../lib/constants';
 import { quotaColor } from '../lib/format';
 import { AccountCard } from './AccountCard';
+import { QuotaResetCountdownPanel } from './QuotaResetCountdownPanel';
+import { buildAccountBlockItems } from '../lib/quota';
 
 interface SiteProviderGroup {
   id: string;
@@ -24,14 +26,17 @@ function AccountBlocks({ accounts }: { accounts: OverviewAccount[] }) {
         if (account.unavailable) {
           return <div key={account.auth_index} style={{ width: BLOCK, height: BLOCK, background: 'var(--danger)' }} />;
         }
-        const items = account.quota.items;
+        const items = buildAccountBlockItems(account);
         if (items.length === 0) {
           return <div key={account.auth_index} style={{ width: BLOCK, height: BLOCK, background: 'var(--muted)', opacity: 0.4 }} />;
         }
         return (
           <div key={account.auth_index} style={{ display: 'flex', gap: GAP_INNER }}>
             {items.map((item) => (
-              <div key={item.id} style={{ width: BLOCK, height: BLOCK, background: quotaColor(item.remaining_percent) }} />
+              <div
+                key={item.key}
+                style={{ width: BLOCK, height: BLOCK, background: quotaColor(item.percent, { missingExpected: item.missingExpected }) }}
+              />
             ))}
           </div>
         );
@@ -65,6 +70,7 @@ export function SitePanel(props: {
       </div>
 
       <AccountBlocks accounts={allAccounts} />
+      <QuotaResetCountdownPanel accounts={allAccounts} />
 
       {open && (
         <div style={{ padding: '0 8px 6px' }}>

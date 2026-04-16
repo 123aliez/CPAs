@@ -1,9 +1,9 @@
 import type { OverviewQuotaItem } from '../../shared/types';
 import { fmtPercent, fmtDateTime, quotaColor } from '../lib/format';
 
-export function QuotaBar({ item }: { item: OverviewQuotaItem }) {
+export function QuotaBar({ item, missingExpected = false }: { item: OverviewQuotaItem; missingExpected?: boolean }) {
   const fill = Math.max(0, Math.min(100, item.remaining_percent ?? 0));
-  const color = quotaColor(item.remaining_percent);
+  const color = quotaColor(item.remaining_percent, { missingExpected });
   return (
     <div style={{ marginBottom: 6 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
