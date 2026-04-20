@@ -8,11 +8,11 @@ export function ProviderSection({ provider, publicMode }: { provider: OverviewPr
   const visibleAccounts = provider.accounts.filter((a) => !a.disabled || !publicMode);
   if (visibleAccounts.length === 0) return null;
 
-  const siteGroups = new Map<string, { siteName: string; siteBaseUrl: string; accounts: OverviewAccount[] }>();
+  const siteGroups = new Map<string, { siteName: string; accounts: OverviewAccount[] }>();
   for (const account of visibleAccounts) {
     const g = siteGroups.get(account.site_id);
     if (g) { g.accounts.push(account); continue; }
-    siteGroups.set(account.site_id, { siteName: account.site_name, siteBaseUrl: account.site_base_url, accounts: [account] });
+    siteGroups.set(account.site_id, { siteName: account.site_name, accounts: [account] });
   }
 
   return (
@@ -31,13 +31,7 @@ export function ProviderSection({ provider, publicMode }: { provider: OverviewPr
       {[...siteGroups.entries()].map(([siteId, group]) => (
         <div key={siteId} style={{ marginTop: 10 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
-            <div>
-              <strong>{group.siteName}</strong>
-              <span style={{ fontSize: 12, color: 'var(--muted)', marginLeft: 8 }}>{group.siteBaseUrl}</span>
-            </div>
-            <a href={group.siteBaseUrl} target="_blank" rel="noreferrer" style={{ fontSize: 12 }}>
-              跳转
-            </a>
+            <div><strong>{group.siteName}</strong></div>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 8 }}>
             {group.accounts.map((account) => (

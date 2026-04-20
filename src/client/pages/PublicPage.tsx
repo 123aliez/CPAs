@@ -18,12 +18,12 @@ export function PublicPage() {
   const activeProviders = overview?.providers.filter((p) => p.visible) ?? [];
 
   const sitePanels = useMemo(() => {
-    const map = new Map<string, { siteName: string; siteBaseUrl: string; providers: Map<string, { id: string; name: string; accounts: typeof activeProviders[0]['accounts'] }> }>();
+    const map = new Map<string, { siteName: string; providers: Map<string, { id: string; name: string; accounts: typeof activeProviders[0]['accounts'] }> }>();
     for (const provider of activeProviders) {
       for (const account of provider.accounts) {
         let site = map.get(account.site_id);
         if (!site) {
-          site = { siteName: account.site_name, siteBaseUrl: account.site_base_url, providers: new Map() };
+          site = { siteName: account.site_name, providers: new Map() };
           map.set(account.site_id, site);
         }
         let pg = site.providers.get(provider.id);
@@ -37,7 +37,6 @@ export function PublicPage() {
     return [...map.entries()].map(([siteId, site]) => ({
       siteId,
       siteName: site.siteName,
-      siteBaseUrl: site.siteBaseUrl,
       providers: [...site.providers.values()],
     }));
   }, [activeProviders]);
@@ -69,7 +68,7 @@ export function PublicPage() {
       {overview ? (
         <div>
           {sitePanels.map((site) => (
-            <SitePanel key={site.siteId} siteName={site.siteName} siteBaseUrl={site.siteBaseUrl} providers={site.providers} publicMode compact={compact} />
+            <SitePanel key={site.siteId} siteName={site.siteName} providers={site.providers} publicMode compact={compact} />
           ))}
           {sitePanels.length === 0 && (
             <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 20 }}>当前没有可展示的数据</div>

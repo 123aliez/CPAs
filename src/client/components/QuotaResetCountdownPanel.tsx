@@ -59,7 +59,13 @@ export function QuotaResetCountdownPanel({ accounts }: { accounts: OverviewAccou
         if (has5h) {
           if (type === 'quota_5h' && item.remaining_percent !== null && item.remaining_percent > 70) continue;
           const totalMinutes = Math.floor(Math.max(0, resetTime - now) / 60000);
-          const roundedMinutes = Math.ceil(totalMinutes / 10) * 10;
+          const days = Math.floor(totalMinutes / 1440);
+          // Align grouping precision with display precision:
+          // when days > 0 the label only shows hours, so round to hours;
+          // otherwise round to 10-minute blocks
+          const roundedMinutes = days > 0
+            ? Math.ceil(totalMinutes / 60) * 60
+            : Math.ceil(totalMinutes / 10) * 10;
           const gk = `${type}::${roundedMinutes}`;
           const existing = preciseGroups.get(gk);
           if (existing) existing.accounts.add(accountKey);

@@ -12,6 +12,7 @@ import type {
   OverviewResponse,
   SessionResponse,
   SiteConnection,
+  SiteConnectionSummary,
   SiteListResponse,
   WarmupConfigResponse,
   WarmupEntry,
@@ -21,6 +22,7 @@ import { getAlertConfig, sendTestWebhook, startAlertScheduler, updateAlertConfig
 import { getWarmupConfig, updateWarmupConfig, startWarmupScheduler, testWarmupEntry } from './warmup.js';
 import { buildMultiSiteOverview } from './multiSiteOverview.js';
 import { deleteSite, loadSiteConnections, saveSite } from './credentials.js';
+import { redactBaseUrls } from './redact.js';
 
 const app = express();
 let publicOverview: OverviewResponse | null = null;
@@ -68,9 +70,9 @@ const authRequired = (req: express.Request, res: express.Response, next: express
   next();
 };
 
-const parseConnectionError = (error: unknown): string => {
+const parseConnectionError = (error: unknown, baseUrls: string[] = []): string => {
   if (!(error instanceof Error) || !('response' in error)) {
-    return error instanceof Error ? error.message : 'Connection failed';
+    return redactBaseUrls(error instanceof Error ? error.message : 'Connection failed', baseUrls);
   }
 
   const response = (error as Error & { response?: { status?: number; data?: unknown } }).response;
@@ -90,13 +92,30 @@ const parseConnectionError = (error: unknown): string => {
     return 'CPA rejected the management key. Check the key and ensure this is the CPA backend URL.';
   }
   if (status === 403) {
-    return backendMessage || 'CPA remote management is disabled or the key is not accepted.';
+    return redactBaseUrls(
+      backendMessage || 'CPA remote management is disabled or the key is not accepted.',
+      baseUrls,
+    );
   }
   if (status === 404) {
     return 'Management API not found. Try the CPA backend root URL, not the panel page URL.';
   }
-  return backendMessage || (error instanceof Error ? error.message : 'Connection failed');
+  return redactBaseUrls(
+    backendMessage || (error instanceof Error ? error.message : 'Connection failed'),
+    baseUrls,
+  );
 };
+
+const serializeSiteForClient = (site: SiteConnection): SiteConnectionSummary => ({
+  id: site.id,
+  name: site.name,
+  enabled: site.enabled,
+  created_at: site.created_at,
+  updated_at: site.updated_at,
+});
+
+const loadClientSites = (): SiteConnectionSummary[] =>
+  loadSiteConnections().map(serializeSiteForClient);
 
 const loadCurrentOverview = async (force = false): Promise<OverviewResponse> => {
   const sites = loadSiteConnections();
@@ -132,40 +151,55 @@ app.post('/api/logout', (_req, res) => {
 });
 
 app.get('/api/sites', authRequired, (_req, res) => {
-  const payload: SiteListResponse = { sites: loadSiteConnections() };
+  const payload: SiteListResponse = { sites: loadClientSites() };
   res.json(payload);
 });
 
 app.post('/api/sites', authRequired, async (req, res) => {
   const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
-  const baseUrl = typeof req.body?.base_url === 'string' ? normalizeCpaBaseUrl(req.body.base_url) : '';
-  const managementKey =
+  const baseUrlInput = typeof req.body?.base_url === 'string' ? req.body.base_url.trim() : '';
+  const managementKeyInput =
     typeof req.body?.management_key === 'string' ? req.body.management_key.trim() : '';
   const enabled = req.body?.enabled !== false;
   const id = typeof req.body?.id === 'string' ? req.body.id.trim() : undefined;
+  const sites = loadSiteConnections();
+  const existing = id ? sites.find((site) => site.id === id) : null;
+
+  if (id && !existing) {
+    res.status(404).json({ error: 'Site not found' });
+    return;
+  }
+
+  const baseUrl = baseUrlInput ? normalizeCpaBaseUrl(baseUrlInput) : existing?.base_url ?? '';
+  const managementKey = managementKeyInput || existing?.management_key || '';
 
   if (!name || !baseUrl || !managementKey) {
     res.status(400).json({ error: 'Missing site name, CPA URL or management key' });
     return;
   }
 
-  try {
-    const client = createCpaClient({ cpaBaseUrl: baseUrl, cpaManagementKey: managementKey });
-    await client.listAuthFiles();
-  } catch (error) {
-    res.status(401).json({ error: `Connection failed: ${parseConnectionError(error)}` });
-    return;
+  const shouldVerifyConnection = !existing || Boolean(baseUrlInput) || Boolean(managementKeyInput);
+  if (shouldVerifyConnection) {
+    try {
+      const client = createCpaClient({ cpaBaseUrl: baseUrl, cpaManagementKey: managementKey });
+      await client.listAuthFiles();
+    } catch (error) {
+      res
+        .status(401)
+        .json({ error: `Connection failed: ${parseConnectionError(error, [baseUrl])}` });
+      return;
+    }
   }
 
-  const saved = saveSite({
+  saveSite({
     id,
     name,
     base_url: baseUrl,
     management_key: managementKey,
     enabled,
   });
-  const payload: SiteListResponse = { sites: loadSiteConnections() };
-  res.json({ ...payload, saved });
+  const payload: SiteListResponse = { sites: loadClientSites() };
+  res.json(payload);
 });
 
 app.delete('/api/sites/:siteId', authRequired, (req, res) => {
@@ -175,7 +209,7 @@ app.delete('/api/sites/:siteId', authRequired, (req, res) => {
     res.status(404).json({ error: 'Site not found' });
     return;
   }
-  const payload: SiteListResponse = { sites: loadSiteConnections() };
+  const payload: SiteListResponse = { sites: loadClientSites() };
   res.json(payload);
 });
 
@@ -195,7 +229,12 @@ app.get('/api/overview', authRequired, async (_req, res) => {
     const overview = await loadCurrentOverview(false);
     res.json(overview);
   } catch (error) {
-    res.status(502).json({ error: error instanceof Error ? error.message : 'Failed to load overview' });
+    res.status(502).json({
+      error: redactBaseUrls(
+        error instanceof Error ? error.message : 'Failed to load overview',
+        loadSiteConnections().map((site) => site.base_url),
+      ),
+    });
   }
 });
 
@@ -204,7 +243,12 @@ app.post('/api/refresh', authRequired, async (_req, res) => {
     const overview = await loadCurrentOverview(true);
     res.json(overview);
   } catch (error) {
-    res.status(502).json({ error: error instanceof Error ? error.message : 'Failed to refresh overview' });
+    res.status(502).json({
+      error: redactBaseUrls(
+        error instanceof Error ? error.message : 'Failed to refresh overview',
+        loadSiteConnections().map((site) => site.base_url),
+      ),
+    });
   }
 });
 

@@ -12,6 +12,7 @@ import type {
 } from '../shared/types.js';
 import type { RawAuthFile } from './cpaClient.js';
 import { createCpaClient } from './cpaClient.js';
+import { redactBaseUrls } from './redact.js';
 import { appConfig } from './config.js';
 
 type UsageDetail = {
@@ -528,10 +529,20 @@ const fetchCodexQuotaWithClient = async (
     : null;
   const pickWindow = (
     windows: Array<Record<string, unknown> | null>,
-    target: 'five-hour' | 'weekly',
+    target: 'weekly',
     fallbackIndex: number
   ) => windows.find((entry) => classifyWindow(entry) === target) ?? windows[fallbackIndex] ?? null;
-  pushWindow('five-hour', '5 小时限额', pickWindow([ratePrimary, rateSecondary], 'five-hour', 0));
+
+  const hasFiveHourWindow = [ratePrimary, rateSecondary].some(
+    (entry) => classifyWindow(entry) === 'five-hour'
+  );
+
+  const fiveHourEntry = [ratePrimary, rateSecondary].find(
+    (entry) => classifyWindow(entry) === 'five-hour'
+  ) ?? null;
+  if (fiveHourEntry) {
+    pushWindow('five-hour', '5 小时限额', fiveHourEntry);
+  }
   pushWindow('weekly', '周限额', pickWindow([ratePrimary, rateSecondary], 'weekly', 1));
   pushWindow('review-weekly', '代码审查周限额', pickWindow([reviewPrimary, reviewSecondary], 'weekly', 1));
   const additional = Array.isArray(payload.additional_rate_limits ?? payload.additionalRateLimits)
@@ -541,7 +552,9 @@ const fetchCodexQuotaWithClient = async (
     if (!isRecord(entry)) return;
     const limit = isRecord(entry.rate_limit ?? entry.rateLimit) ? (entry.rate_limit ?? entry.rateLimit) as Record<string, unknown> : null;
     const name = normalizeString(entry.limit_name ?? entry.limitName ?? entry.metered_feature ?? entry.meteredFeature) ?? `扩展限额 ${index + 1}`;
-    pushWindow(`extra-${index}-primary`, `${name} 5 小时限额`, isRecord(limit?.primary_window ?? limit?.primaryWindow) ? (limit?.primary_window ?? limit?.primaryWindow) as Record<string, unknown> : null);
+    if (hasFiveHourWindow) {
+      pushWindow(`extra-${index}-primary`, `${name} 5 小时限额`, isRecord(limit?.primary_window ?? limit?.primaryWindow) ? (limit?.primary_window ?? limit?.primaryWindow) as Record<string, unknown> : null);
+    }
     pushWindow(`extra-${index}-secondary`, `${name} 周限额`, isRecord(limit?.secondary_window ?? limit?.secondaryWindow) ? (limit?.secondary_window ?? limit?.secondaryWindow) as Record<string, unknown> : null);
   });
   const plan = resolveCodexPlan(file);
@@ -817,6 +830,7 @@ const fetchAntigravityQuotaWithClient = async (
 };
 
 const fetchQuota = async (
+  siteBaseUrl: string,
   cpaClient: ReturnType<typeof createCpaClient>,
   cachePrefix: string,
   file: RawAuthFile,
@@ -843,7 +857,7 @@ const fetchQuota = async (
     result = {
       ...emptyQuota(),
       raw_status: 'error',
-      error: error instanceof Error ? error.message : 'Unknown error',
+      error: redactBaseUrls(error instanceof Error ? error.message : 'Unknown error', [siteBaseUrl]),
     };
   }
   quotaCache.set(cacheKey, { updatedAt: Date.now(), data: result });
@@ -851,6 +865,7 @@ const fetchQuota = async (
 };
 
 const mapAccount = async (
+  siteBaseUrl: string,
   cpaClient: ReturnType<typeof createCpaClient>,
   cachePrefix: string,
   file: RawAuthFile,
@@ -863,14 +878,13 @@ const mapAccount = async (
   if (!provider || !authIndex || !name) return null;
   const fileUsage = summarizeUsage(details.filter((detail) => detail.authIndex === authIndex));
   const quota =
-    file.runtime_only || file.disabled
+    file.runtime_only
       ? emptyQuota()
-      : await fetchQuota(cpaClient, cachePrefix, file, forceQuota);
+      : await fetchQuota(siteBaseUrl, cpaClient, cachePrefix, file, forceQuota);
   return {
     auth_index: authIndex,
     site_id: '',
     site_name: '',
-    site_base_url: '',
     name,
     label: normalizeString(file.label),
     provider,
@@ -972,6 +986,58 @@ const computeProviderUsage = (provider: OverviewProvider): OverviewUsage => {
   };
 };
 
+const isWeeklyQuotaItem = (item: OverviewQuotaItem): boolean => {
+  const id = item.id;
+  if (id === 'seven_day' || id === 'weekly') return true;
+  const label = item.label.replace(/\s+/g, '');
+  return label.includes('周');
+};
+
+const syncAccountEnabledState = async (
+  cpaClient: ReturnType<typeof createCpaClient>,
+  files: RawAuthFile[],
+  accounts: OverviewAccount[]
+): Promise<void> => {
+  if (!appConfig.autoManageAccounts) return;
+
+  const fileMap = new Map<string, RawAuthFile>();
+  for (const file of files) {
+    const idx = file.auth_index;
+    if (idx) fileMap.set(idx, file);
+  }
+
+  for (const account of accounts) {
+    const file = fileMap.get(account.auth_index);
+    if (!file?.name) continue;
+    if (file.source !== 'file' && file.source !== 'memory') continue;
+
+    const weeklyItem = account.quota.items.find(isWeeklyQuotaItem);
+    if (!weeklyItem) continue;
+
+    const remaining = weeklyItem.remaining_percent;
+
+    if (account.disabled) {
+      if (remaining !== null && remaining > 1) {
+        try {
+          await cpaClient.setAuthFileDisabled(file.name, false);
+          console.log(`[auto-manage] enabled ${file.name} — weekly quota recovered (${Math.round(remaining)}%)`);
+        } catch (err) {
+          console.error(`[auto-manage] failed to enable ${file.name}: ${err instanceof Error ? err.message : err}`);
+        }
+      }
+    } else {
+      if (remaining !== null && remaining <= 1) {
+        try {
+          await cpaClient.setAuthFileDisabled(file.name, true);
+          console.log(`[auto-manage] disabled ${file.name} — weekly quota exhausted`);
+        } catch (err) {
+          console.error(`[auto-manage] failed to disable ${file.name}: ${err instanceof Error ? err.message : err}`);
+        }
+      }
+    }
+  }
+};
+
 export const buildOverview = async (
   connection: { cpaBaseUrl: string; cpaManagementKey: string },
   options?: { forceUsage?: boolean; forceQuota?: boolean }
@@ -987,7 +1053,7 @@ export const buildOverview = async (
   const mappedAccounts = await Promise.all(
     files
       .filter((file) => file.runtime_only !== true)
-      .map((file) => mapAccount(cpaClient, cachePrefix, file, details, options?.forceQuota))
+      .map((file) => mapAccount(connection.cpaBaseUrl, cpaClient, cachePrefix, file, details, options?.forceQuota))
   );
 
   const accounts = mappedAccounts.filter((item): item is OverviewAccount => item !== null);
@@ -1000,6 +1066,8 @@ export const buildOverview = async (
   const totalRequests24h = providers.reduce((sum, provider) => sum + provider.usage.last_24h.requests, 0);
   const totalTokens24h = providers.reduce((sum, provider) => sum + provider.usage.last_24h.tokens, 0);
   const exhaustedAccounts = accounts.filter((account) => account.quota_state.exceeded).length;
+
+  await syncAccountEnabledState(cpaClient, files, accounts);
 
   return {
     generated_at: new Date().toISOString(),

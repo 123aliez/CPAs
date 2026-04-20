@@ -60,7 +60,6 @@ export interface OverviewAccount {
   auth_index: string;
   site_id: string;
   site_name: string;
-  site_base_url: string;
   name: string;
   label: string | null;
   provider: ProviderId;
@@ -99,7 +98,6 @@ export interface OverviewProvider {
 export interface OverviewSiteSummary {
   id: string;
   name: string;
-  base_url: string;
   enabled: boolean;
   status: 'ok' | 'error' | 'disabled';
   generated_at: string | null;
@@ -179,8 +177,21 @@ export interface SiteConnection {
   updated_at: string;
 }
 
+export type SiteConnectionSummary = Pick<
+  SiteConnection,
+  'id' | 'name' | 'enabled' | 'created_at' | 'updated_at'
+>;
+
+export interface SaveSiteRequest {
+  id?: string | null;
+  name: string;
+  base_url?: string;
+  management_key?: string;
+  enabled: boolean;
+}
+
 export interface SiteListResponse {
-  sites: SiteConnection[];
+  sites: SiteConnectionSummary[];
 }
 
 /* ───── Warmup (API preheat) ───── */

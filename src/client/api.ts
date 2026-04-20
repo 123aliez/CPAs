@@ -3,6 +3,7 @@ import type {
   AlertTestResponse,
   AlertConfig,
   OverviewResponse,
+  SaveSiteRequest,
   SessionResponse,
   SiteListResponse,
   WarmupConfigResponse,
@@ -31,7 +32,7 @@ export const logout = () => request<SessionResponse>('/api/logout', { method: 'P
 
 export const fetchSites = () => request<SiteListResponse>('/api/sites');
 
-export const saveSite = (body: { id?: string | null; name: string; base_url: string; management_key: string; enabled: boolean }) =>
+export const saveSite = (body: SaveSiteRequest) =>
   request<SiteListResponse>('/api/sites', { method: 'POST', body: JSON.stringify(body) });
 
 export const deleteSite = (id: string) =>

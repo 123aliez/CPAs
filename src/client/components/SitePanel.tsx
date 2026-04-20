@@ -1,10 +1,10 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { OverviewAccount } from '../../shared/types';
 import { providerAccent } from '../lib/constants';
-import { quotaColor } from '../lib/format';
+import { fmtPercent, quotaColor } from '../lib/format';
 import { AccountCard } from './AccountCard';
 import { QuotaResetCountdownPanel } from './QuotaResetCountdownPanel';
-import { buildAccountBlockItems } from '../lib/quota';
+import { buildAccountBlockItems, classifyQuotaType } from '../lib/quota';
 
 interface SiteProviderGroup {
   id: string;
@@ -47,7 +47,6 @@ function AccountBlocks({ accounts }: { accounts: OverviewAccount[] }) {
 
 export function SitePanel(props: {
   siteName: string;
-  siteBaseUrl: string;
   providers: SiteProviderGroup[];
   publicMode?: boolean;
   compact?: boolean;
@@ -55,16 +54,49 @@ export function SitePanel(props: {
   const [open, setOpen] = useState(false);
   const allAccounts = props.providers.flatMap((p) => props.publicMode ? p.accounts.filter((a) => !a.disabled) : p.accounts);
 
+  const site5hPercent = useMemo(() => {
+    const values: number[] = [];
+    for (const account of allAccounts) {
+      if (account.disabled) continue;
+      const item = account.quota.items.find((quota) => classifyQuotaType(quota) === 'quota_5h');
+      if (!item || item.remaining_percent === null) continue;
+      values.push(item.remaining_percent);
+    }
+    return values.length > 0 ? values.reduce((s, v) => s + v, 0) / values.length : null;
+  }, [allAccounts]);
+
+  const siteWeekPercent = useMemo(() => {
+    const values: number[] = [];
+    for (const account of allAccounts) {
+      if (account.disabled) continue;
+      const item = account.quota.items.find((quota) => classifyQuotaType(quota) === 'quota_week');
+      if (!item || item.remaining_percent === null) continue;
+      values.push(item.remaining_percent);
+    }
+    return values.length > 0 ? values.reduce((s, v) => s + v, 0) / values.length : null;
+  }, [allAccounts]);
+
+  const siteQuotaColor = quotaColor(site5hPercent ?? siteWeekPercent);
+
   return (
     <section style={{ border: '1px solid var(--line)', marginTop: 10 }}>
       <div
         onClick={() => setOpen((v) => !v)}
         style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 8px', cursor: 'pointer', userSelect: 'none' }}
       >
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
           <span style={{ fontSize: 12, color: 'var(--muted)' }}>{open ? '\u25BC' : '\u25B6'}</span>
           <strong>{props.siteName}</strong>
-          <span style={{ fontSize: 12, color: 'var(--muted)' }}>{props.siteBaseUrl}</span>
+          {site5hPercent !== null && (
+            <span style={{ fontSize: 12, color: quotaColor(site5hPercent), fontWeight: 600 }}>
+              5h {fmtPercent(site5hPercent)}
+            </span>
+          )}
+          {siteWeekPercent !== null && (
+            <span style={{ fontSize: 12, color: quotaColor(siteWeekPercent), fontWeight: 600 }}>
+              周 {fmtPercent(siteWeekPercent)}
+            </span>
+          )}
         </div>
         <span style={{ fontSize: 12, color: 'var(--muted)' }}>{allAccounts.length} 个账号</span>
       </div>

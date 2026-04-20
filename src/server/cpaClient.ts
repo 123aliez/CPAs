@@ -108,5 +108,9 @@ export const createCpaClient = (input: { cpaBaseUrl: string; cpaManagementKey: s
       const { bodyText, body } = normalizeBody(response.data?.body);
       return { statusCode, header, bodyText, body };
     },
+
+    async setAuthFileDisabled(name: string, disabled: boolean): Promise<void> {
+      await client.patch('/auth-files/status', { name, disabled });
+    },
   };
 };

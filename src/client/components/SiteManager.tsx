@@ -1,9 +1,9 @@
 import { useState } from 'react';
-import type { SiteConnection, SiteListResponse, OverviewResponse } from '../../shared/types';
+import type { SiteConnectionSummary, OverviewResponse } from '../../shared/types';
 import * as api from '../api';
 import { StatusPill } from './StatusPill';
 
-export function SiteManager(props: { sites: SiteConnection[]; overviewSites?: OverviewResponse['sites']; onReload: () => Promise<void> }) {
+export function SiteManager(props: { sites: SiteConnectionSummary[]; overviewSites?: OverviewResponse['sites']; onReload: () => Promise<void> }) {
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [name, setName] = useState('');
@@ -17,9 +17,9 @@ export function SiteManager(props: { sites: SiteConnection[]; overviewSites?: Ov
 
   const openAdd = () => { closeModal(); setModalOpen(true); };
 
-  const editSite = (site: SiteConnection) => {
-    setEditingId(site.id); setName(site.name); setBaseUrl(site.base_url);
-    setManagementKey(site.management_key); setEnabled(site.enabled); setMessage(''); setModalOpen(true);
+  const editSite = (site: SiteConnectionSummary) => {
+    setEditingId(site.id); setName(site.name); setBaseUrl('');
+    setManagementKey(''); setEnabled(site.enabled); setMessage(''); setModalOpen(true);
   };
 
   const save = async () => {
@@ -35,7 +35,7 @@ export function SiteManager(props: { sites: SiteConnection[]; overviewSites?: Ov
     }
   };
 
-  const remove = async (site: SiteConnection) => {
+  const remove = async (site: SiteConnectionSummary) => {
     if (!window.confirm(`删除站点"${site.name}"？`)) return;
     try {
       await api.deleteSite(site.id);
@@ -66,11 +66,9 @@ export function SiteManager(props: { sites: SiteConnection[]; overviewSites?: Ov
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
                   <strong style={{ fontSize: 14 }}>{site.name}</strong>
-                  <a href={site.base_url.replace(/\/$/, '') + '/management.html#'} target="_blank" rel="noreferrer" style={{ fontSize: 12 }}>跳转</a>
                 </div>
                 <StatusPill variant={site.enabled ? 'live' : 'muted'}>{site.enabled ? 'enabled' : 'disabled'}</StatusPill>
               </div>
-              <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>{site.base_url}</div>
               {status && (
                 <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>
                   <span>状态：</span>
@@ -107,10 +105,39 @@ export function SiteManager(props: { sites: SiteConnection[]; overviewSites?: Ov
                   <option value="off">停用</option>
                 </select>
               </label>
-              <label className="span-2">CPA 地址<input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://your-cpa-host" /></label>
-              <label className="span-2">管理密钥<input type="password" value={managementKey} onChange={(e) => setManagementKey(e.target.value)} /></label>
+              <label className="span-2">
+                CPA 地址
+                <input
+                  value={baseUrl}
+                  onChange={(e) => setBaseUrl(e.target.value)}
+                  placeholder={editingId ? '留空表示保持原 CPA 地址' : 'https://your-cpa-host'}
+                />
+              </label>
+              <label className="span-2">
+                管理密钥
+                <input
+                  type="password"
+                  value={managementKey}
+                  onChange={(e) => setManagementKey(e.target.value)}
+                  placeholder={editingId ? '留空表示保持原管理密钥' : ''}
+                  autoComplete="new-password"
+                />
+              </label>
+              {editingId && (
+                <div className="span-2" style={{ fontSize: 12, color: 'var(--muted)' }}>
+                  留空表示保持原值，仅在需要替换时填写。
+                </div>
+              )}
               <div className="span-2">
-                <button onClick={() => void save()} disabled={saving || !name.trim() || !baseUrl.trim() || !managementKey.trim()}>
+                <button
+                  onClick={() => void save()}
+                  disabled={
+                    saving ||
+                    !name.trim() ||
+                    (!editingId && !baseUrl.trim()) ||
+                    (!editingId && !managementKey.trim())
+                  }
+                >
                   {saving ? '校验并保存中...' : editingId ? '保存修改' : '添加站点'}
                 </button>
               </div>

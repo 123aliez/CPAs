@@ -13,7 +13,6 @@ export function SiteStatusGrid({ sites }: { sites: OverviewResponse['sites'] }) 
               {site.status}
             </StatusPill>
           </div>
-          <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>{site.base_url}</div>
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>
             <span>{site.active_account_count}/{site.account_count} 活跃</span>
             <span>{fmtDateTime(site.generated_at)}</span>

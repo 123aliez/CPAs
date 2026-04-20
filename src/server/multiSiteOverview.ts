@@ -9,6 +9,7 @@ import type {
   SiteConnection,
 } from '../shared/types.js';
 import { buildOverview } from './overview.js';
+import { redactBaseUrls } from './redact.js';
 
 const providerOrder = ['claude', 'codex', 'gemini-cli', 'kimi', 'antigravity'];
 
@@ -88,7 +89,6 @@ const buildEmptyOverview = (sites: SiteConnection[]): OverviewResponse => ({
   sites: sites.map((site) => ({
     id: site.id,
     name: site.name,
-    base_url: site.base_url,
     enabled: site.enabled,
     status: site.enabled ? 'error' : 'disabled',
     generated_at: null,
@@ -132,7 +132,6 @@ export const buildMultiSiteOverview = async (
     siteSummaries.set(site.id, {
       id: site.id,
       name: site.name,
-      base_url: site.base_url,
       enabled: site.enabled,
       status: site.enabled ? 'error' : 'disabled',
       generated_at: null,
@@ -174,7 +173,6 @@ export const buildMultiSiteOverview = async (
         auth_index: `${site.id}:${account.auth_index}`,
         site_id: site.id,
         site_name: site.name,
-        site_base_url: site.base_url,
       }));
 
       if (!current) {
@@ -202,7 +200,10 @@ export const buildMultiSiteOverview = async (
     if (!summary) continue;
     summary.status = 'error';
     summary.generated_at = null;
-    summary.error = result.reason instanceof Error ? result.reason.message : '站点同步失败';
+    summary.error = redactBaseUrls(
+      result.reason instanceof Error ? result.reason.message : '站点同步失败',
+      sites.map((item) => item.base_url),
+    );
   }
 
   if (healthySiteCount === 0) {

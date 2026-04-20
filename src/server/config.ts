@@ -24,4 +24,5 @@ export const appConfig = {
   cookieName: process.env.COOKIE_NAME?.trim() || 'quota_session',
   adminPassword: process.env.ADMIN_PASSWORD?.trim() || null,
   publicDir: path.resolve(process.cwd(), 'dist/client'),
+  autoManageAccounts: process.env.AUTO_MANAGE_ACCOUNTS?.trim() !== 'false',
 };
