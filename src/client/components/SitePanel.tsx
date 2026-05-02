@@ -54,6 +54,11 @@ export function SitePanel(props: {
   const [open, setOpen] = useState(false);
   const allAccounts = props.providers.flatMap((p) => props.publicMode ? p.accounts.filter((a) => !a.disabled) : p.accounts);
 
+  const activeCount = useMemo(() => {
+    const all = props.providers.flatMap((p) => p.accounts);
+    return all.filter((a) => !a.disabled && a.status_message !== '401').length;
+  }, [props.providers]);
+
   const site5hPercent = useMemo(() => {
     const values: number[] = [];
     for (const account of allAccounts) {
@@ -78,6 +83,20 @@ export function SitePanel(props: {
 
   const siteQuotaColor = quotaColor(site5hPercent ?? siteWeekPercent);
 
+  const authErrors = useMemo(() => {
+    return props.providers.flatMap((p) =>
+      p.accounts
+        .filter((a) => a.status === 'error' && a.status_message === '401')
+        .map((a) => {
+          const n = a.name.replace(/\.json$/, '');
+          const atIdx = n.indexOf('@');
+          const base = atIdx >= 0 ? n.slice(0, atIdx) : n;
+          const dashIdx = base.indexOf('-');
+          return dashIdx >= 0 ? base.slice(dashIdx + 1) : base;
+        }),
+    );
+  }, [props.providers]);
+
   return (
     <section style={{ border: '1px solid var(--line)', marginTop: 10 }}>
       <div
@@ -97,8 +116,16 @@ export function SitePanel(props: {
               周 {fmtPercent(siteWeekPercent)}
             </span>
           )}
+          {authErrors.length > 0 && (
+            <span style={{ fontSize: 12, color: 'var(--danger)', fontWeight: 600 }}>
+              401: {authErrors.join(' ')}
+            </span>
+          )}
         </div>
-        <span style={{ fontSize: 12, color: 'var(--muted)' }}>{allAccounts.length} 个账号</span>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, fontSize: 12, color: 'var(--muted)' }}>
+          <span>活跃 {activeCount}</span>
+          <span>{allAccounts.length} 个账号</span>
+        </div>
       </div>
 
       <AccountBlocks accounts={allAccounts} />

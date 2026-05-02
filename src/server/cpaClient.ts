@@ -1,5 +1,11 @@
 import axios from 'axios';
 
+export type RecentRequestBucket = {
+  time: string;
+  success: number;
+  failed: number;
+};
+
 export type RawAuthFile = {
   auth_index?: string;
   name?: string;
@@ -20,6 +26,9 @@ export type RawAuthFile = {
   id_token?: unknown;
   metadata?: Record<string, unknown>;
   attributes?: Record<string, unknown>;
+  success?: number;
+  failed?: number;
+  recent_requests?: RecentRequestBucket[];
   quota?: {
     exceeded?: boolean;
     reason?: string;
@@ -91,8 +100,12 @@ export const createCpaClient = (input: { cpaBaseUrl: string; cpaManagementKey: s
     },
 
     async getUsage(): Promise<UsageSnapshot> {
-      const response = await client.get<UsageSnapshot>('/usage');
-      return response.data ?? {};
+      try {
+        const response = await client.get<UsageSnapshot>('/usage');
+        return response.data ?? {};
+      } catch {
+        return {};
+      }
     },
 
     async apiCall(payload: {

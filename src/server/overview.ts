@@ -15,14 +15,6 @@ import { createCpaClient } from './cpaClient.js';
 import { redactBaseUrls } from './redact.js';
 import { appConfig } from './config.js';
 
-type UsageDetail = {
-  authIndex: string;
-  timestampMs: number;
-  failed: boolean;
-  totalTokens: number;
-  model: string;
-};
-
 type QuotaCacheEntry = {
   updatedAt: number;
   data: OverviewQuota;
@@ -39,7 +31,6 @@ const providerNames: Record<ProviderId, string> = {
 const providerOrder: ProviderId[] = ['claude', 'codex', 'gemini-cli', 'kimi', 'antigravity'];
 
 const quotaCache = new Map<string, QuotaCacheEntry>();
-const usageCache = new Map<string, { updatedAt: number; details: UsageDetail[] }>();
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -236,107 +227,55 @@ const quotaStatusFromPercent = (remainingPercent: number | null): OverviewQuotaI
   return 'ok';
 };
 
-const usageDetailTokens = (value: Record<string, unknown>): number => {
-  const tokens = isRecord(value.tokens) ? value.tokens : {};
-  const explicitTotal = normalizeNumber(tokens.total_tokens);
-  if (explicitTotal !== null) return explicitTotal;
-  return (
-    (normalizeNumber(tokens.input_tokens) ?? 0) +
-    (normalizeNumber(tokens.output_tokens) ?? 0) +
-    (normalizeNumber(tokens.reasoning_tokens) ?? 0)
-  );
+type FileUsageSummary = {
+  requests_1h: number;
+  requests_24h: number;
+  failed_1h: number;
+  failed_24h: number;
 };
 
-const getUsageDetails = async (
-  cpaClient: ReturnType<typeof createCpaClient>,
-  cacheKey: string,
-  force = false
-): Promise<UsageDetail[]> => {
-  const cached = usageCache.get(cacheKey);
-  if (!force && cached && Date.now() - cached.updatedAt < appConfig.usageTtlMs) {
-    return cached.details;
+const getFileUsageFromRecentRequests = (file: RawAuthFile): FileUsageSummary => {
+  const buckets = file.recent_requests;
+  if (!Array.isArray(buckets) || buckets.length === 0) {
+    return { requests_1h: 0, requests_24h: 0, failed_1h: 0, failed_24h: 0 };
   }
-  const usage = await cpaClient.getUsage();
-  const details: UsageDetail[] = [];
-  const apis = isRecord(usage.usage?.apis) ? usage.usage?.apis : {};
-  for (const apiEntry of Object.values(apis)) {
-    if (!isRecord(apiEntry)) continue;
-    const models = isRecord(apiEntry.models) ? apiEntry.models : {};
-    for (const [model, modelEntry] of Object.entries(models)) {
-      if (!isRecord(modelEntry)) continue;
-      const rawDetails = Array.isArray(modelEntry.details) ? modelEntry.details : [];
-      for (const item of rawDetails) {
-        if (!isRecord(item)) continue;
-        const authIndex = normalizeString(item.auth_index);
-        const timestamp = normalizeString(item.timestamp);
-        if (!authIndex || !timestamp) continue;
-        const timestampMs = Date.parse(timestamp);
-        if (Number.isNaN(timestampMs)) continue;
-        details.push({
-          authIndex,
-          timestampMs,
-          failed: item.failed === true,
-          totalTokens: usageDetailTokens(item),
-          model,
-        });
-      }
-    }
-  }
-  usageCache.set(cacheKey, { updatedAt: Date.now(), details });
-  return details;
-};
-
-const summarizeUsage = (details: UsageDetail[]): OverviewUsage => {
-  const now = Date.now();
-  const modelMap = new Map<string, OverviewModelUsage>();
-  let req1h = 0;
-  let token1h = 0;
+  const now = new Date();
+  const currentHour = now.getHours();
+  const currentMinute = now.getMinutes();
+  let requests1h = 0;
+  let requests24h = 0;
   let failed1h = 0;
-  let req24h = 0;
-  let token24h = 0;
   let failed24h = 0;
-  let req7d = 0;
-  let token7d = 0;
-  let failed7d = 0;
-
-  for (const detail of details) {
-    const age = now - detail.timestampMs;
-    if (age <= 60 * 60 * 1000) {
-      req1h += 1;
-      token1h += detail.totalTokens;
-      if (detail.failed) failed1h += 1;
-    }
-    if (age <= 24 * 60 * 60 * 1000) {
-      req24h += 1;
-      token24h += detail.totalTokens;
-      if (detail.failed) failed24h += 1;
-    }
-    if (age <= 7 * 24 * 60 * 60 * 1000) {
-      req7d += 1;
-      token7d += detail.totalTokens;
-      if (detail.failed) failed7d += 1;
-      const entry = modelMap.get(detail.model) ?? {
-        model: detail.model,
-        requests: 0,
-        tokens: 0,
-        failed_requests: 0,
-      };
-      entry.requests += 1;
-      entry.tokens += detail.totalTokens;
-      if (detail.failed) entry.failed_requests += 1;
-      modelMap.set(detail.model, entry);
+  for (const bucket of buckets) {
+    const match = bucket.time?.match(/^(\d{2}):(\d{2})-(\d{2}):(\d{2})$/);
+    if (!match) continue;
+    const startHour = parseInt(match[1], 10);
+    const startMin = parseInt(match[2], 10);
+    const endHour = parseInt(match[3], 10);
+    const endMin = parseInt(match[4], 10);
+    const success = bucket.success ?? 0;
+    const failed = bucket.failed ?? 0;
+    const total = success + failed;
+    if (total === 0) continue;
+    requests24h += total;
+    failed24h += failed;
+    const bucketEndMinutes = endHour * 60 + endMin;
+    const nowMinutes = currentHour * 60 + currentMinute;
+    const diff = nowMinutes - bucketEndMinutes;
+    if (diff >= 0 && diff < 60) {
+      requests1h += total;
+      failed1h += failed;
     }
   }
-
-  return {
-    last_1h: buildWindow(req1h, token1h, failed1h),
-    last_24h: buildWindow(req24h, token24h, failed24h),
-    last_7d: buildWindow(req7d, token7d, failed7d),
-    models: Array.from(modelMap.values())
-      .sort((a, b) => b.requests - a.requests || b.tokens - a.tokens)
-      .slice(0, 5),
-  };
+  return { requests_1h: requests1h, requests_24h: requests24h, failed_1h: failed1h, failed_24h: failed24h };
 };
+
+const buildFileUsage = (fileSummary: FileUsageSummary): OverviewUsage => ({
+  last_1h: buildWindow(fileSummary.requests_1h, 0, fileSummary.failed_1h),
+  last_24h: buildWindow(fileSummary.requests_24h, 0, fileSummary.failed_24h),
+  last_7d: buildWindow(0, 0, 0),
+  models: [],
+});
 
 const apiCallJson = async (
   cpaClient: ReturnType<typeof createCpaClient>,
@@ -794,7 +733,8 @@ const fetchAntigravityQuotaWithClient = async (
   const groups = [
     { id: 'claude-gpt', label: 'Claude / GPT', modelIds: ['claude-sonnet-4-6', 'claude-opus-4-6-thinking', 'gpt-oss-120b-medium'] },
     { id: 'gemini-pro', label: 'Gemini Pro', modelIds: ['gemini-3.1-pro-high', 'gemini-3.1-pro-low', 'gemini-3-pro-high', 'gemini-3-pro-low'] },
-    { id: 'gemini-flash', label: 'Gemini Flash', modelIds: ['gemini-2.5-flash', 'gemini-2.5-flash-thinking', 'gemini-2.5-flash-lite', 'gemini-3-flash'] },
+    { id: 'gemini-flash-2.5', label: 'Gemini Flash 2.5', modelIds: ['gemini-2.5-flash', 'gemini-2.5-flash-thinking', 'gemini-2.5-flash-lite'] },
+    { id: 'gemini-flash-3', label: 'Gemini Flash 3', modelIds: ['gemini-3-flash'] },
   ];
   const items: OverviewQuotaItem[] = [];
   for (const group of groups) {
@@ -805,11 +745,13 @@ const fetchAntigravityQuotaWithClient = async (
       const entry = isRecord(models[modelId]) ? models[modelId] : null;
       if (!entry) continue;
       const quotaInfo = isRecord(entry.quotaInfo ?? entry.quota_info) ? (entry.quotaInfo ?? entry.quota_info) as Record<string, unknown> : {};
-      const fraction = normalizeFraction(quotaInfo.remainingFraction ?? quotaInfo.remaining_fraction ?? quotaInfo.remaining);
+      const rawFraction = normalizeFraction(quotaInfo.remainingFraction ?? quotaInfo.remaining_fraction ?? quotaInfo.remaining);
+      const candidateReset = normalizeDateValue(quotaInfo.resetTime ?? quotaInfo.reset_time);
+      // No fraction but has resetTime → quota exhausted, waiting for reset
+      const fraction = rawFraction ?? (candidateReset ? 0 : null);
       if (fraction === null) continue;
       matched.push(modelId);
       minFraction = minFraction === null ? fraction : Math.min(minFraction, fraction);
-      const candidateReset = normalizeDateValue(quotaInfo.resetTime ?? quotaInfo.reset_time);
       if (!resetAt || (candidateReset && Date.parse(candidateReset) < Date.parse(resetAt))) {
         resetAt = candidateReset;
       }
@@ -869,18 +811,18 @@ const mapAccount = async (
   cpaClient: ReturnType<typeof createCpaClient>,
   cachePrefix: string,
   file: RawAuthFile,
-  details: UsageDetail[],
   forceQuota = false
 ): Promise<OverviewAccount | null> => {
   const provider = detectProvider(file);
   const authIndex = normalizeString(file.auth_index);
   const name = normalizeString(file.name);
   if (!provider || !authIndex || !name) return null;
-  const fileUsage = summarizeUsage(details.filter((detail) => detail.authIndex === authIndex));
+  const fileUsage = buildFileUsage(getFileUsageFromRecentRequests(file));
   const quota =
     file.runtime_only
       ? emptyQuota()
       : await fetchQuota(siteBaseUrl, cpaClient, cachePrefix, file, forceQuota);
+  const noQuota = !file.runtime_only && quota.items.length === 0;
   return {
     auth_index: authIndex,
     site_id: '',
@@ -892,8 +834,8 @@ const mapAccount = async (
     active: true,
     disabled: file.disabled === true,
     runtime_only: file.runtime_only === true,
-    status: normalizeString(file.status) ?? 'unknown',
-    status_message: normalizeString(file.status_message) ?? '',
+    status: noQuota ? 'error' : (normalizeString(file.status) ?? 'unknown'),
+    status_message: noQuota ? '401' : (normalizeString(file.status_message) ?? ''),
     unavailable: file.unavailable === true,
     source: normalizeString(file.source) ?? 'memory',
     priority: normalizeNumber(file.priority),
@@ -1011,25 +953,39 @@ const syncAccountEnabledState = async (
     if (!file?.name) continue;
     if (file.source !== 'file' && file.source !== 'memory') continue;
 
-    const weeklyItem = account.quota.items.find(isWeeklyQuotaItem);
-    if (!weeklyItem) continue;
+    let shouldDisable: boolean;
+    let shouldEnable: boolean;
 
-    const remaining = weeklyItem.remaining_percent;
+    if (account.provider === 'antigravity') {
+      const proItem = account.quota.items.find((item) => item.id === 'gemini-pro');
+      const flash3Item = account.quota.items.find((item) => item.id === 'gemini-flash-3');
+      if (!proItem || !flash3Item) continue;
+      const proExhausted = proItem.remaining_percent != null && proItem.remaining_percent <= 1;
+      const flash3Exhausted = flash3Item.remaining_percent != null && flash3Item.remaining_percent <= 1;
+      shouldDisable = proExhausted && flash3Exhausted;
+      shouldEnable = !proExhausted || !flash3Exhausted;
+    } else {
+      const weeklyItem = account.quota.items.find(isWeeklyQuotaItem);
+      if (!weeklyItem) continue;
+      const remaining = weeklyItem.remaining_percent;
+      shouldDisable = remaining !== null && remaining <= 1;
+      shouldEnable = remaining !== null && remaining > 1;
+    }
 
     if (account.disabled) {
-      if (remaining !== null && remaining > 1) {
+      if (shouldEnable) {
         try {
           await cpaClient.setAuthFileDisabled(file.name, false);
-          console.log(`[auto-manage] enabled ${file.name} — weekly quota recovered (${Math.round(remaining)}%)`);
+          console.log(`[auto-manage] enabled ${file.name} — quota recovered (${account.provider})`);
         } catch (err) {
           console.error(`[auto-manage] failed to enable ${file.name}: ${err instanceof Error ? err.message : err}`);
         }
       }
     } else {
-      if (remaining !== null && remaining <= 1) {
+      if (shouldDisable) {
         try {
           await cpaClient.setAuthFileDisabled(file.name, true);
-          console.log(`[auto-manage] disabled ${file.name} — weekly quota exhausted`);
+          console.log(`[auto-manage] disabled ${file.name} — quota exhausted (${account.provider})`);
         } catch (err) {
           console.error(`[auto-manage] failed to disable ${file.name}: ${err instanceof Error ? err.message : err}`);
         }
@@ -1044,16 +1000,12 @@ export const buildOverview = async (
 ): Promise<OverviewResponse> => {
   const cpaClient = createCpaClient(connection);
   const cachePrefix = Buffer.from(connection.cpaBaseUrl).toString('base64url').slice(0, 16);
-  const [files, details] = await Promise.all([
-    cpaClient.listAuthFiles(),
-    getUsageDetails(cpaClient, cachePrefix, options?.forceUsage),
-  ]);
-  const usageCached = usageCache.get(cachePrefix);
+  const files = await cpaClient.listAuthFiles();
 
   const mappedAccounts = await Promise.all(
     files
       .filter((file) => file.runtime_only !== true)
-      .map((file) => mapAccount(connection.cpaBaseUrl, cpaClient, cachePrefix, file, details, options?.forceQuota))
+      .map((file) => mapAccount(connection.cpaBaseUrl, cpaClient, cachePrefix, file, options?.forceQuota))
   );
 
   const accounts = mappedAccounts.filter((item): item is OverviewAccount => item !== null);
@@ -1072,7 +1024,7 @@ export const buildOverview = async (
   return {
     generated_at: new Date().toISOString(),
     cache: {
-      usage_refreshed_at: usageCached ? new Date(usageCached.updatedAt).toISOString() : null,
+      usage_refreshed_at: new Date().toISOString(),
       quota_refreshed_at:
         Array.from(quotaCache.keys()).some((key) => key.startsWith(`${cachePrefix}:`))
           ? new Date(
